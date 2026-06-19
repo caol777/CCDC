@@ -1,0 +1,141 @@
+---
+# create_admin.yml
+# Creates a backup admin account on all Linux and Windows machines.
+# Run this early in competition so you always have a recovery account.
+#
+# Usage:
+#   ansible-playbook -i inventory.ini create_admin.yml
+#
+# To target only Linux or only Windows:
+#   ansible-playbook -i inventory.ini create_admin.yml --limit linux
+#   ansible-playbook -i inventory.ini create_admin.yml --limit windows
+
+- name: Load variables
+  hosts: all
+  gather_facts: false
+  tasks:
+    - name: Include vars
+      include_vars: vars.yml
+
+# ============================================================
+# LINUX
+# ============================================================
+- name: Create backup admin on Linux
+  hosts: linux
+  become: true
+  vars_files:
+    - vars.yml
+
+  tasks:
+    - name: Create backup admin user
+      ansible.builtin.user:
+        name: "{{ backup_admin_username }}"
+        password: "{{ backup_admin_password | password_hash('sha512') }}"
+        shell: /bin/bash
+        create_home: true
+        state: present
+
+    - name: Add to sudo group (Debian/Ubuntu)
+      ansible.builtin.user:
+        name: "{{ backup_admin_username }}"
+        groups: sudo
+        append: true
+      when: ansible_facts['os_family'] == 'Debian'
+      ignore_errors: true
+
+    - name: Add to wheel group (RHEL/CentOS/Fedora/Alpine)
+      ansible.builtin.user:
+        name: "{{ backup_admin_username }}"
+        groups: wheel
+        append: true
+      when: ansible_facts['os_family'] in ['RedHat', 'Alpine', 'Suse', 'Archlinux']
+      ignore_errors: true
+
+    - name: Ensure sudo group exists (fallback for minimal distros)
+      ansible.builtin.group:
+        name: sudo
+        state: present
+      ignore_errors: true
+
+    - name: Grant NOPASSWD sudo (when backup_admin_nopasswd_sudo is true)
+      ansible.builtin.copy:
+        dest: "/etc/sudoers.d/{{ backup_admin_username }}"
+        content: "{{ backup_admin_username }} ALL=(ALL) NOPASSWD: ALL\n"
+        mode: '0440'
+        validate: '/usr/sbin/visudo -cf %s'
+      when: backup_admin_nopasswd_sudo | bool
+
+    - name: Grant password-required sudo (when backup_admin_nopasswd_sudo is false)
+      ansible.builtin.copy:
+        dest: "/etc/sudoers.d/{{ backup_admin_username }}"
+        content: "{{ backup_admin_username }} ALL=(ALL) ALL\n"
+        mode: '0440'
+        validate: '/usr/sbin/visudo -cf %s'
+      when: not (backup_admin_nopasswd_sudo | bool)
+
+    - name: Create .ssh directory
+      ansible.builtin.file:
+        path: "/home/{{ backup_admin_username }}/.ssh"
+        state: directory
+        owner: "{{ backup_admin_username }}"
+        group: "{{ backup_admin_username }}"
+        mode: '0700'
+
+    - name: Add SSH authorized key
+      ansible.posix.authorized_key:
+        user: "{{ backup_admin_username }}"
+        key: "{{ backup_admin_ssh_pubkey }}"
+        state: present
+        exclusive: false
+      when: backup_admin_ssh_pubkey != "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAA REPLACE_WITH_YOUR_PUBLIC_KEY ccdc_backup"
+
+    - name: Verify account is enabled
+      ansible.builtin.command: "passwd -u {{ backup_admin_username }}"
+      ignore_errors: true
+      changed_when: false
+
+    - name: Print Linux result
+      ansible.builtin.debug:
+        msg: "Backup admin '{{ backup_admin_username }}' created on {{ inventory_hostname }} ({{ ansible_host }})"
+
+# ============================================================
+# WINDOWS
+# ============================================================
+- name: Create backup admin on Windows
+  hosts: windows
+  vars_files:
+    - vars.yml
+
+  tasks:
+    - name: Create local admin user
+      ansible.windows.win_user:
+        name: "{{ backup_admin_username }}"
+        password: "{{ backup_admin_password }}"
+        password_never_expires: true
+        account_disabled: false
+        state: present
+
+    - name: Add user to local Administrators group
+      ansible.windows.win_group_membership:
+        name: Administrators
+        members:
+          - "{{ backup_admin_username }}"
+        state: present
+
+    - name: Ensure account is not locked out
+      ansible.windows.win_user:
+        name: "{{ backup_admin_username }}"
+        account_locked: false
+        state: present
+
+    - name: Set RDP access (allow this user to RDP in)
+      ansible.windows.win_group_membership:
+        name: "Remote Desktop Users"
+        members:
+          - "{{ backup_admin_username }}"
+        state: present
+      ignore_errors: true
+
+    - name: Print Windows result
+      ansible.builtin.debug:
+        msg: "Backup admin '{{ backup_admin_username }}' created on {{ inventory_hostname }} ({{ ansible_host }})"

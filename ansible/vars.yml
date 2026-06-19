@@ -1,0 +1,18 @@
+# ============================================================
+# EDIT BEFORE COMPETITION
+# ============================================================
+
+# The backup admin account that will be created on every machine
+backup_admin_username: "ccdc_backup"
+
+# Password used on both Linux and Windows
+# Make it long — this account is your lifeline
+backup_admin_password: "Backd00r_CCDC_2025!"
+
+# SSH public key for passwordless Linux access (paste your public key here)
+# Generate with: ssh-keygen -t ed25519 -f ~/.ssh/ccdc_backup
+# Then paste the contents of ~/.ssh/ccdc_backup.pub below
+backup_admin_ssh_pubkey: "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAA REPLACE_WITH_YOUR_PUBLIC_KEY ccdc_backup"
+
+# Linux sudo access — true = NOPASSWD (useful if password gets changed by red team)
+backup_admin_nopasswd_sudo: true
